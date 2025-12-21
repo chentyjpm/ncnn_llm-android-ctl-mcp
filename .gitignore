@@ -1,0 +1,8 @@
+# Default ignored files
+gradle
+build
+.gradle
+.idea
+local.properties
+gradlew
+gradlew.bat

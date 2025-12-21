@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ncnn_llm_ctl</string>
+    <string name="accessibility_service_description">Control system UI with taps and text input</string>
+</resources>

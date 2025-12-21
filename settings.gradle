@@ -1,0 +1,2 @@
+rootProject.name = "ncnn_llm_ctl"
+include ':app'
