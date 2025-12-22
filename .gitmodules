@@ -1,0 +1,3 @@
+[submodule "third_party/ncnn_llm"]
+	path = third_party/ncnn_llm
+	url = https://github.com/futz12/ncnn_llm.git
