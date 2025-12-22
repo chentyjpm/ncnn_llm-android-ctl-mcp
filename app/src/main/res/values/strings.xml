@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">ncnn_llm_ctl</string>
-    <string name="accessibility_service_description">Control system UI with taps and text input</string>
+    <string name="accessibility_service_description">通过无障碍服务获取当前屏幕控件信息</string>
 </resources>

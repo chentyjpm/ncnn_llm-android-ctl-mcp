@@ -5,82 +5,52 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
-import android.view.View;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
-import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    private EditText inputX;
-    private EditText inputY;
-    private EditText inputText;
+    private TextView outputText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        inputX = findViewById(R.id.inputX);
-        inputY = findViewById(R.id.inputY);
-        inputText = findViewById(R.id.inputText);
+        outputText = findViewById(R.id.outputText);
 
         Button btnOpenSettings = findViewById(R.id.btnOpenSettings);
-        Button btnTap = findViewById(R.id.btnTap);
-        Button btnInputText = findViewById(R.id.btnInputText);
+        Button btnDumpUi = findViewById(R.id.btnDumpUi);
+        Button btnGlobalAction = findViewById(R.id.btnGlobalAction);
 
         btnOpenSettings.setOnClickListener(v -> openAccessibilitySettings());
 
-        btnTap.setOnClickListener(v -> {
-            String xText = inputX.getText().toString().trim();
-            String yText = inputY.getText().toString().trim();
-            if (TextUtils.isEmpty(xText) || TextUtils.isEmpty(yText)) {
-                toast("Please input X and Y.");
-                return;
-            }
-
-            int x;
-            int y;
-            try {
-                x = Integer.parseInt(xText);
-                y = Integer.parseInt(yText);
-            } catch (NumberFormatException e) {
-                toast("Invalid coordinates.");
-                return;
-            }
-
+        btnDumpUi.setOnClickListener(v -> {
             AccessCtlService service = requireService();
             if (service == null) {
                 return;
             }
-
-            boolean ok = service.clickAt(x, y);
-            if (!ok) {
-                toast("Tap failed. Ensure the service is enabled.");
+            String dump = service.getCurrentUiDump();
+            if (TextUtils.isEmpty(dump)) {
+                toast("未获取到屏幕内容。");
+            } else {
+                outputText.setText(dump);
             }
         });
 
-        btnInputText.setOnClickListener(v -> {
-            String text = inputText.getText().toString();
-            if (TextUtils.isEmpty(text)) {
-                toast("Please input text.");
-                return;
-            }
-
+        btnGlobalAction.setOnClickListener(v -> {
             AccessCtlService service = requireService();
             if (service == null) {
                 return;
             }
-
-            boolean ok = service.inputText(text);
-            if (!ok) {
-                toast("Input failed. Focus a text field first.");
-            }
+            showGlobalActionDialog(service);
         });
     }
 
@@ -91,12 +61,12 @@ public class MainActivity extends AppCompatActivity {
 
     private AccessCtlService requireService() {
         if (!isServiceEnabled()) {
-            toast("Enable the accessibility service first.");
+            toast("请先开启无障碍服务。");
             return null;
         }
         AccessCtlService service = AccessCtlService.getInstance();
         if (service == null) {
-            toast("Service not connected yet.");
+            toast("服务尚未连接。");
         }
         return service;
     }
@@ -114,6 +84,27 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return false;
+    }
+
+    private void showGlobalActionDialog(AccessCtlService service) {
+        List<String> names = service.getGlobalActionNames();
+        if (names == null || names.isEmpty()) {
+            toast("无可用的全局动作。");
+            return;
+        }
+        String[] items = names.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("选择全局动作")
+                .setItems(items, (dialog, which) -> {
+                    String name = service.performGlobalActionByIndex(which);
+                    if (TextUtils.isEmpty(name)) {
+                        toast("全局动作执行失败。");
+                    } else {
+                        toast("已执行: " + name);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void toast(String message) {
