@@ -286,7 +286,7 @@ public class AccessCtlService extends AccessibilityService {
         panelView = inflater.inflate(R.layout.overlay_panel, null);
 
         bubbleParams = new WindowManager.LayoutParams(
-                dp(56),
+                WindowManager.LayoutParams.WRAP_CONTENT,
                 dp(56),
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
