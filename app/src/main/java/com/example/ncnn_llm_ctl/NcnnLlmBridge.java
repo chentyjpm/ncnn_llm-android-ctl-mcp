@@ -18,6 +18,8 @@ public final class NcnnLlmBridge {
 
     public static native boolean startOpenAiServerWithWebRoot(String modelPath, int port, boolean useVulkan, String webRootPath);
 
+    public static native void registerAccessibilityToolBridge(AccessibilityToolBridge bridge);
+
     public static boolean startOpenAiServerAutoDownload(android.content.Context context,
                                                         String modelName,
                                                         int port,

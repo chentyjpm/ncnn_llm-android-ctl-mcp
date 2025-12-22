@@ -14,6 +14,8 @@
 #include "options.h"
 #include "tools.h"
 #include "mcp.h"
+#include "json_utils.h"
+#include "android_tool_bridge.h"
 
 namespace {
 std::atomic<bool> g_server_running(false);
@@ -80,9 +82,35 @@ static void log_model_dir_summary(const std::string& model_dir) {
 }
 }
 
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
+    android_tool_bridge_init(vm);
+    return JNI_VERSION_1_6;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_startOpenAiServerWithWebRoot(
         JNIEnv* env, jclass clazz, jstring modelPath, jint port, jboolean useVulkan, jstring webRootPath);
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_registerAccessibilityToolBridge(
+        JNIEnv* env, jclass clazz, jobject bridge);
+
+namespace {
+struct LocalLlmHandle {
+    explicit LocalLlmHandle(const std::string& model_path, bool use_vulkan)
+        : model(model_path, use_vulkan) {}
+
+    std::mutex mu;
+    ncnn_llm_gpt model;
+};
+
+static void throw_runtime(JNIEnv* env, const std::string& msg) {
+    jclass ex = env->FindClass("java/lang/RuntimeException");
+    if (ex) {
+        env->ThrowNew(ex, msg.c_str());
+    }
+}
+}
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_hello(JNIEnv* env, jclass clazz) {
@@ -191,4 +219,103 @@ Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_startOpenAiServerWithWebRoot(
     }).detach();
 
     return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_registerAccessibilityToolBridge(
+        JNIEnv* env, jclass clazz, jobject bridge) {
+    (void)clazz;
+    android_tool_bridge_set(env, bridge);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_example_ncnn_1llm_1ctl_NcnnLlmLocal_create(JNIEnv* env, jclass clazz, jstring modelPath, jboolean useVulkan) {
+    (void)clazz;
+    if (modelPath == nullptr) {
+        throw_runtime(env, "modelPath is null");
+        return 0;
+    }
+    const char* model_path_c = env->GetStringUTFChars(modelPath, nullptr);
+    std::string model_path = model_path_c ? model_path_c : "";
+    env->ReleaseStringUTFChars(modelPath, model_path_c);
+
+    if (model_path.empty()) {
+        throw_runtime(env, "modelPath is empty");
+        return 0;
+    }
+    bool vulkan = (useVulkan == JNI_TRUE);
+
+    try {
+        __android_log_print(ANDROID_LOG_INFO, kTag, "Local create modelPath=%s useVulkan=%d",
+                            model_path.c_str(), vulkan ? 1 : 0);
+        auto* handle = new LocalLlmHandle(model_path, vulkan);
+        return (jlong)reinterpret_cast<intptr_t>(handle);
+    } catch (const std::exception& e) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "Local create failed: %s", e.what());
+        throw_runtime(env, std::string("create failed: ") + e.what());
+        return 0;
+    } catch (...) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "Local create failed: unknown error");
+        throw_runtime(env, "create failed: unknown error");
+        return 0;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_ncnn_1llm_1ctl_NcnnLlmLocal_destroy(JNIEnv* env, jclass clazz, jlong handlePtr) {
+    (void)env;
+    (void)clazz;
+    auto* handle = reinterpret_cast<LocalLlmHandle*>((intptr_t)handlePtr);
+    if (!handle) return;
+    __android_log_print(ANDROID_LOG_INFO, kTag, "Local destroy handle=%p", handle);
+    delete handle;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_ncnn_1llm_1ctl_NcnnLlmLocal_generate(
+        JNIEnv* env, jclass clazz, jlong handlePtr, jstring prompt, jint maxNewTokens,
+        jfloat temperature, jfloat topP, jint topK) {
+    (void)clazz;
+    auto* handle = reinterpret_cast<LocalLlmHandle*>((intptr_t)handlePtr);
+    if (!handle) {
+        throw_runtime(env, "handle is null");
+        return nullptr;
+    }
+    if (prompt == nullptr) {
+        throw_runtime(env, "prompt is null");
+        return nullptr;
+    }
+
+    const char* prompt_c = env->GetStringUTFChars(prompt, nullptr);
+    std::string prompt_s = prompt_c ? prompt_c : "";
+    env->ReleaseStringUTFChars(prompt, prompt_c);
+
+    GenerateConfig cfg;
+    cfg.max_new_tokens = (int)maxNewTokens > 0 ? (int)maxNewTokens : cfg.max_new_tokens;
+    cfg.temperature = (float)temperature;
+    cfg.top_p = (float)topP;
+    cfg.top_k = (int)topK > 0 ? (int)topK : cfg.top_k;
+
+    try {
+        __android_log_print(ANDROID_LOG_INFO, kTag,
+                            "Local generate handle=%p promptBytes=%d maxNewTokens=%d temp=%.3f topP=%.3f topK=%d",
+                            handle, (int)prompt_s.size(), cfg.max_new_tokens, cfg.temperature, cfg.top_p, cfg.top_k);
+        std::string out;
+        {
+            std::lock_guard<std::mutex> lock(handle->mu);
+            auto ctx = handle->model.prefill(prompt_s);
+            handle->model.generate(ctx, cfg, [&](const std::string& token) {
+                out += sanitize_utf8(token);
+            });
+        }
+        return env->NewStringUTF(out.c_str());
+    } catch (const std::exception& e) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "Local generate failed: %s", e.what());
+        throw_runtime(env, std::string("generate failed: ") + e.what());
+        return nullptr;
+    } catch (...) {
+        __android_log_print(ANDROID_LOG_ERROR, kTag, "Local generate failed: unknown error");
+        throw_runtime(env, "generate failed: unknown error");
+        return nullptr;
+    }
 }

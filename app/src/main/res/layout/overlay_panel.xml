@@ -1,37 +1,15 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="320dp"
+    android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/overlay_panel_bg"
     android:orientation="vertical"
     android:padding="12dp">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/btnOverlayDumpUi"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="抓取 UI" />
-
-        <Button
-            android:id="@+id/btnOverlayClose"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
-            android:text="最小化" />
-    </LinearLayout>
-
     <TextView
         android:id="@+id/overlayFixedText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="固定提示区域"
+        android:text="LLM："
         android:textStyle="bold" />
 
     <ScrollView
@@ -44,7 +22,32 @@
             android:id="@+id/overlayOutputText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="抓取结果会显示在这里。"
+            android:text="输出会显示在这里。"
             android:textIsSelectable="true" />
     </ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/overlayChatInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="输入消息"
+            android:imeOptions="actionSend"
+            android:inputType="text"
+            android:maxLines="3"
+            android:singleLine="false" />
+
+        <Button
+            android:id="@+id/btnOverlaySend"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="发送" />
+    </LinearLayout>
 </LinearLayout>

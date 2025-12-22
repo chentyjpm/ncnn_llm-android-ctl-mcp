@@ -19,6 +19,7 @@ set(NCNN_LLM_RUN_SRC
     "${NCNN_LLM_RUN_DIR}/openai_server.cpp"
     "${NCNN_LLM_RUN_DIR}/json_utils.cpp"
     "${NCNN_LLM_RUN_DIR}/tools.cpp"
+    "${NCNN_LLM_RUN_DIR}/android_tool_bridge.cpp"
     "${NCNN_LLM_RUN_DIR}/util.cpp"
     "${NCNN_LLM_RUN_DIR}/options.cpp"
     "${NCNN_LLM_RUN_DIR}/mcp.cpp"

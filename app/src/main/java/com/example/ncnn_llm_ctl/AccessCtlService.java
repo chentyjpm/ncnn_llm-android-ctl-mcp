@@ -7,6 +7,8 @@ import android.content.ClipboardManager;
 import android.graphics.Path;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -17,20 +19,40 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class AccessCtlService extends AccessibilityService {
 
     private static volatile AccessCtlService instance;
+    private static final String LOCAL_SERVER_BASE_URL = "http://127.0.0.1:18080";
+    private static final String DEFAULT_MODEL = "qwen3_0.6b";
+
     private AccessibilityNodeInfo lastEditable;
     private WindowManager windowManager;
     private View bubbleView;
     private View panelView;
     private WindowManager.LayoutParams bubbleParams;
     private WindowManager.LayoutParams panelParams;
+    private TextView bubbleInfoText;
+    private ScrollView bubbleInfoScroll;
+    private TextView panelFixedText;
+    private TextView panelOutputText;
+    private ScrollView panelOutputScroll;
+    private EditText panelChatInput;
+    private Button panelChatSend;
+    private final StringBuilder overlayLlmBuffer = new StringBuilder();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final AtomicBoolean overlayChatInFlight = new AtomicBoolean(false);
+    private final List<JSONObject> overlayChatMessages = new ArrayList<>();
 
     public static AccessCtlService getInstance() {
         return instance;
@@ -75,8 +97,70 @@ public class AccessCtlService extends AccessibilityService {
             lastEditable = null;
         }
         removeOverlay();
+        bubbleInfoText = null;
+        bubbleInfoScroll = null;
+        panelFixedText = null;
+        panelOutputText = null;
+        panelOutputScroll = null;
         instance = null;
         super.onDestroy();
+    }
+
+    public void clearOverlayLlmText() {
+        mainHandler.post(() -> {
+            overlayLlmBuffer.setLength(0);
+            setOverlayTexts("LLM：", "");
+        });
+    }
+
+    public void appendOverlayLlmText(String text) {
+        if (text == null) {
+            return;
+        }
+        mainHandler.post(() -> {
+            overlayLlmBuffer.append(text);
+            trimOverlayBufferIfNeeded();
+            setOverlayTexts("LLM：", overlayLlmBuffer.toString());
+        });
+    }
+
+    public void appendOverlayLogLine(String line) {
+        if (line == null) {
+            return;
+        }
+        mainHandler.post(() -> {
+            overlayLlmBuffer.append('\n').append(line);
+            trimOverlayBufferIfNeeded();
+            setOverlayTexts("LLM：", overlayLlmBuffer.toString());
+        });
+    }
+
+    private void trimOverlayBufferIfNeeded() {
+        // Keep last ~1200 chars to avoid UI lag.
+        int max = 1200;
+        if (overlayLlmBuffer.length() <= max) {
+            return;
+        }
+        int start = overlayLlmBuffer.length() - max;
+        overlayLlmBuffer.delete(0, Math.max(0, start));
+    }
+
+    private void setOverlayTexts(String fixed, String body) {
+        if (bubbleInfoText != null) {
+            bubbleInfoText.setText(body);
+            if (bubbleInfoScroll != null) {
+                bubbleInfoScroll.post(() -> bubbleInfoScroll.fullScroll(View.FOCUS_DOWN));
+            }
+        }
+        if (panelFixedText != null) {
+            panelFixedText.setText(fixed);
+        }
+        if (panelOutputText != null) {
+            panelOutputText.setText(body);
+            if (panelOutputScroll != null) {
+                panelOutputScroll.post(() -> panelOutputScroll.fullScroll(View.FOCUS_DOWN));
+            }
+        }
     }
 
     public boolean clickAt(int x, int y) {
@@ -159,6 +243,76 @@ public class AccessCtlService extends AccessibilityService {
             }
             boolean ok = performClickOnNode(node);
             node.recycle();
+            if (ok) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean clickByText(String text, boolean contains) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            return false;
+        }
+        List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(text);
+        root.recycle();
+        if (nodes == null || nodes.isEmpty()) {
+            return false;
+        }
+        for (AccessibilityNodeInfo node : nodes) {
+            if (node == null) {
+                continue;
+            }
+            CharSequence t = node.getText();
+            boolean match;
+            if (t == null) {
+                match = false;
+            } else if (contains) {
+                match = t.toString().contains(text);
+            } else {
+                match = text.contentEquals(t);
+            }
+            boolean ok = false;
+            if (match) {
+                ok = performClickOnNode(node);
+            }
+            node.recycle();
+            if (ok) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean setTextByViewId(String viewId, String text) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            return false;
+        }
+        List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(viewId);
+        root.recycle();
+        if (nodes == null || nodes.isEmpty()) {
+            return false;
+        }
+        for (AccessibilityNodeInfo node : nodes) {
+            if (node == null) {
+                continue;
+            }
+            boolean ok;
+            try {
+                if (!node.isFocused()) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                }
+                Bundle args = new Bundle();
+                args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+                ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                if (!ok) {
+                    ok = pasteText(node, text);
+                }
+            } finally {
+                node.recycle();
+            }
             if (ok) {
                 return true;
             }
@@ -285,8 +439,21 @@ public class AccessCtlService extends AccessibilityService {
         bubbleView = inflater.inflate(R.layout.overlay_bubble, null);
         panelView = inflater.inflate(R.layout.overlay_panel, null);
 
+        bubbleInfoText = bubbleView.findViewById(R.id.overlayBubbleInfo);
+        bubbleInfoScroll = bubbleView.findViewById(R.id.overlayBubbleScroll);
+        panelFixedText = panelView.findViewById(R.id.overlayFixedText);
+        panelOutputText = panelView.findViewById(R.id.overlayOutputText);
+        panelOutputScroll = panelView.findViewById(R.id.overlayOutputScroll);
+        panelChatInput = panelView.findViewById(R.id.overlayChatInput);
+        panelChatSend = panelView.findViewById(R.id.btnOverlaySend);
+        setOverlayTexts("LLM：", "等待中…");
+
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int bubbleTextWidth = Math.round(screenWidth * 2f / 3f);
+        int bubbleWidth = dp(56) + dp(8) + bubbleTextWidth;
+
         bubbleParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                bubbleWidth,
                 dp(56),
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -296,39 +463,99 @@ public class AccessCtlService extends AccessibilityService {
         bubbleParams.y = dp(120);
 
         panelParams = new WindowManager.LayoutParams(
-                dp(320),
+                screenWidth,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 android.graphics.PixelFormat.TRANSLUCENT);
         panelParams.gravity = Gravity.START | Gravity.TOP;
-        panelParams.x = dp(16);
+        panelParams.x = 0;
         panelParams.y = dp(100);
 
         bubbleView.setOnClickListener(v -> showPanel());
         bubbleView.setOnTouchListener(new DragTouchListener(bubbleParams));
 
-        Button btnDumpUi = panelView.findViewById(R.id.btnOverlayDumpUi);
-        Button btnClose = panelView.findViewById(R.id.btnOverlayClose);
-        TextView outputText = panelView.findViewById(R.id.overlayOutputText);
+        panelView.setClickable(true);
+        panelView.setOnClickListener(v -> hidePanel());
 
-        btnDumpUi.setOnClickListener(v -> {
-            String dump = getCurrentUiDump();
-            if (TextUtils.isEmpty(dump)) {
-                outputText.setText("未获取到屏幕内容。");
-            } else {
-                outputText.setText(dump);
-            }
-            View scroll = panelView.findViewById(R.id.overlayOutputScroll);
-            if (scroll instanceof android.widget.ScrollView) {
-                android.widget.ScrollView scrollView = (android.widget.ScrollView) scroll;
-                scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
-            }
-        });
-
-        btnClose.setOnClickListener(v -> hidePanel());
+        if (panelChatSend != null) {
+            panelChatSend.setOnClickListener(v -> sendOverlayChat());
+        }
 
         windowManager.addView(bubbleView, bubbleParams);
+    }
+
+    private void sendOverlayChat() {
+        if (panelChatInput == null) {
+            return;
+        }
+        String text = panelChatInput.getText() == null ? "" : panelChatInput.getText().toString();
+        if (TextUtils.isEmpty(text.trim())) {
+            showToast("请输入内容。");
+            return;
+        }
+        if (!overlayChatInFlight.compareAndSet(false, true)) {
+            showToast("正在请求中…");
+            return;
+        }
+        panelChatInput.setText("");
+
+        clearOverlayLlmText();
+        appendOverlayLogLine("[我] " + text);
+
+        try {
+            JSONObject msg = new JSONObject();
+            msg.put("role", "user");
+            msg.put("content", text);
+            overlayChatMessages.add(msg);
+        } catch (Exception e) {
+            overlayChatInFlight.set(false);
+            appendOverlayLogLine("[系统] JSON 组装失败：" + e.getMessage());
+            return;
+        }
+
+        new Thread(() -> {
+            StringBuilder reply = new StringBuilder();
+            try {
+                ChatClient.chatCompletionsStream(LOCAL_SERVER_BASE_URL, DEFAULT_MODEL, overlayChatMessages, new ChatClient.StreamListener() {
+                    @Override
+                    public void onDelta(String t) {
+                        if (TextUtils.isEmpty(t)) return;
+                        reply.append(t);
+                        appendOverlayLlmText(t);
+                    }
+
+                    @Override
+                    public void onToolTrace(String toolTrace) {
+                        String namesOnly = ToolTraceFormatter.toolNamesOnly(toolTrace);
+                        if (TextUtils.isEmpty(namesOnly)) return;
+                        appendOverlayLogLine("[工具] " + namesOnly);
+                    }
+
+                    @Override
+                    public void onDone() {
+                        try {
+                            JSONObject assistant = new JSONObject();
+                            assistant.put("role", "assistant");
+                            assistant.put("content", reply.toString());
+                            overlayChatMessages.add(assistant);
+                        } catch (Exception ignore) {
+                        }
+                        overlayChatInFlight.set(false);
+                        appendOverlayLogLine("[系统] 完成");
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        overlayChatInFlight.set(false);
+                        appendOverlayLogLine("[系统] 流式请求失败：" + message);
+                    }
+                });
+            } catch (Exception e) {
+                overlayChatInFlight.set(false);
+                appendOverlayLogLine("[系统] 请求失败：" + e.getMessage());
+            }
+        }).start();
     }
 
     private void removeOverlay() {

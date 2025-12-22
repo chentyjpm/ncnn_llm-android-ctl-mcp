@@ -9,7 +9,7 @@
         android:id="@+id/titleText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="无障碍控制"
+        android:text="ncnn_llm 无障碍控制"
         android:textSize="20sp"
         android:textStyle="bold"
         app:layout_constraintTop_toTopOf="parent"
@@ -21,7 +21,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="开启服务后可抓取当前屏幕控件信息。"
+        android:text="开启服务后可抓取当前屏幕控件信息，并通过模型调用工具执行操作。"
         app:layout_constraintTop_toBottomOf="@id/titleText"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
@@ -40,8 +40,9 @@
         android:id="@+id/btnDumpUi"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:text="抓取当前UI"
+        android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/btnOpenSettings"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
@@ -73,6 +74,7 @@
         android:layout_marginTop="8dp"
         android:max="1000"
         android:progress="0"
+        android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/btnStartServer"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
@@ -83,6 +85,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
         android:text="下载进度：0%"
+        android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/downloadProgress"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
@@ -93,6 +96,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
         android:text="下载速度：0 KB/s"
+        android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/downloadStatus"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
@@ -103,9 +107,39 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:text="全局动作测试"
+        android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/downloadSpeed"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <LinearLayout
+        android:id="@+id/chatBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal"
+        app:layout_constraintTop_toBottomOf="@id/btnGlobalAction"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <EditText
+            android:id="@+id/chatInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="输入消息…"
+            android:text="1. 调用工具先抓取当前屏幕的UI&#10;2. 在UI里面找到发送按钮并点击&#10;"
+            android:imeOptions="actionSend"
+            android:inputType="textMultiLine"
+            android:maxLines="6" />
+
+        <Button
+            android:id="@+id/btnSendChat"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="发送" />
+    </LinearLayout>
 
     <ScrollView
         android:id="@+id/outputScroll"
@@ -113,7 +147,7 @@
         android:layout_height="0dp"
         android:layout_marginTop="12dp"
         android:fillViewport="true"
-        app:layout_constraintTop_toBottomOf="@id/btnGlobalAction"
+        app:layout_constraintTop_toBottomOf="@id/chatBar"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -122,7 +156,7 @@
             android:id="@+id/outputText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="抓取结果会显示在这里。"
+            android:text="对话与抓取结果会显示在这里。"
             android:textIsSelectable="true" />
     </ScrollView>
 
