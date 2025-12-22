@@ -6,3 +6,7 @@ build
 local.properties
 gradlew
 gradlew.bat
+third_party
+app/.cxx
+BITD034.tmp
+third_party/ncnn_llm
