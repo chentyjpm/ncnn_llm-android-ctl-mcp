@@ -6,6 +6,13 @@ android {
     namespace 'com.example.ncnn_llm_ctl'
     compileSdk 34
 
+    sourceSets {
+        main {
+            // Package ncnn_llm demo webpage into APK assets (index.html).
+            assets.srcDirs += ['../third_party/ncnn_llm/examples/web']
+        }
+    }
+
     defaultConfig {
         applicationId 'com.example.ncnn_llm_ctl'
         minSdk 28

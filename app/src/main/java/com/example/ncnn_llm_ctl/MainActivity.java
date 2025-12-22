@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -20,6 +21,8 @@ import java.text.DecimalFormat;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "MainActivity";
 
     private TextView outputText;
     private Spinner modelSpinner;
@@ -52,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
             if (service == null) {
                 return;
             }
+            Log.i(TAG, "Dump UI requested");
             String dump = service.getCurrentUiDump();
             if (TextUtils.isEmpty(dump)) {
                 toast("未获取到屏幕内容。");
@@ -62,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
 
         btnStartServer.setOnClickListener(v -> {
             String modelName = (String) modelSpinner.getSelectedItem();
+            Log.i(TAG, "Start server clicked, modelName=" + modelName);
             if (TextUtils.isEmpty(modelName)) {
                 toast("请输入模型名称。");
                 return;
@@ -79,17 +84,22 @@ public class MainActivity extends AppCompatActivity {
                     };
                     java.io.File modelDir = ModelDownloader.ensureModel(
                             getApplicationContext(), modelName, listener);
-                    boolean ok = NcnnLlmBridge.startOpenAiServer(
-                            modelDir.getAbsolutePath(), 8080, false);
+                    Log.i(TAG, "Model ready at " + modelDir.getAbsolutePath());
+                    java.io.File webRoot = WebAssetDeployer.ensureWebRoot(getApplicationContext());
+                    Log.i(TAG, "Web root ready at " + webRoot.getAbsolutePath());
+                    boolean ok = NcnnLlmBridge.startOpenAiServerWithWebRoot(
+                            modelDir.getAbsolutePath(), 18080, false, webRoot.getAbsolutePath());
+                    Log.i(TAG, "startOpenAiServer returned " + ok);
                     runOnUiThread(() -> {
                         if (ok) {
-                            toast("服务已启动，端口 8080。");
+                            toast("服务已启动，端口 18080。");
                         } else {
                             toast("服务启动失败或已在运行。");
                         }
                         btnStartServer.setEnabled(true);
                     });
                 } catch (Exception e) {
+                    Log.e(TAG, "Start server failed: " + e.getMessage(), e);
                     runOnUiThread(() -> {
                         toast("启动失败: " + e.getMessage());
                         btnStartServer.setEnabled(true);
