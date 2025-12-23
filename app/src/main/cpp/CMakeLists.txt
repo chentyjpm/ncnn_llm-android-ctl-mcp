@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../..")
-set(NCNN_INCLUDE_DIR "${PROJECT_ROOT}/third_party/ncnn/include")
+set(NCNN_INCLUDE_DIR "${PROJECT_ROOT}/third_party/ncnn_headers")
 set(NCNN_LLM_SRC_DIR "${PROJECT_ROOT}/third_party/ncnn_llm/src")
 set(NCNN_LLM_RUN_DIR "${PROJECT_ROOT}/third_party/ncnn_llm/examples/llm_ncnn_run")
 
