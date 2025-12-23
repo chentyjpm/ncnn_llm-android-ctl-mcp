@@ -1,11 +1,8 @@
 # Default ignored files
-gradle
 build
 .gradle
 .idea
 local.properties
-gradlew
-gradlew.bat
 app/.cxx
 app/release
 BITD034.tmp
