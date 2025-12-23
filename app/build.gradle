@@ -5,6 +5,7 @@ plugins {
 android {
     namespace 'com.example.ncnn_llm_ctl'
     compileSdk 34
+    ndkVersion "25.1.8937393"
 
     sourceSets {
         main {
@@ -40,6 +41,7 @@ android {
     externalNativeBuild {
         cmake {
             path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
         }
     }
 }
