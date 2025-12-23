@@ -2,6 +2,12 @@
 
 这是一个 Android Studio 工程（Java），基于风佬的ncnn_llm 通过 **无障碍服务** 获取系统/其他应用的 UI 结构，并通过集成的 **ncnn_llm** 让大模型调用工具执行自动化操作。
 
+同时验证了风佬的 ncnn_llm 在安卓平台运行的可行性
+
+## 本项目的实现主要参考：
+- ncnn_llm：https://github.com/futz12/ncnn_llm
+- ncnn：https://github.com/Tencent/ncnn
+
 ## 功能概览
 
 - 无障碍服务：抓取当前屏幕 UI 树（全局/其他应用界面）
@@ -56,3 +62,7 @@ adb forward tcp:18080 tcp:18080
 
 本项目依赖无障碍服务对系统/其他应用界面进行操作，请确保仅在你有权限且合法合规的场景中使用。
 
+## 致谢
+- futz12/ncnn_llm
+- Tencent/ncnn
+- EdVince/Stable-Diffusion-NCNN
