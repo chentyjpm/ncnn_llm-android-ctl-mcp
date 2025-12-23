@@ -7,7 +7,7 @@
 - [Release 页面](https://github.com/chentyjpm/ncnn_llm-android-ctl-mcp/releases)
 - [最新版本（latest）](https://github.com/chentyjpm/ncnn_llm-android-ctl-mcp/releases/latest)
 
-[![Android CI](https://github.com/ncnn_llm-android-ctl-mcp/releases/actions/workflows/android-ci.yml/badge.svg)](https://github.com/ncnn_llm-android-ctl-mcp/releases/actions/workflows/android-ci.yml)
+[![Android CI](https://github.com/chentyjpm/ncnn_llm-android-ctl-mcp/actions/workflows/android-ci.yml/badge.svg)](https://github.com/chentyjpm/ncnn_llm-android-ctl-mcp/actions/workflows/android-ci.yml)
 
 ## 参考项目
 
@@ -115,4 +115,3 @@ adb forward tcp:18080 tcp:18080
 - futz12/ncnn_llm
 - Tencent/ncnn
 - EdVince/Stable-Diffusion-NCNN
-
