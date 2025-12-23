@@ -18,6 +18,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 import java.text.DecimalFormat;
 import java.util.ArrayList;
@@ -145,6 +146,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startServerWithDownload() {
+        if (serverStarted && !ChatClient.ping(LOCAL_SERVER_BASE_URL, 800)) {
+            Log.w(TAG, "serverStarted=true but /health unreachable, resetting flag");
+            serverStarted = false;
+            refreshServerButton();
+        }
         if (serverStarted) {
             toast("模型服务已启动。");
             refreshServerButton();
@@ -190,13 +196,52 @@ public class MainActivity extends AppCompatActivity {
                         modelDir.getAbsolutePath(), 18080, false, webRoot.getAbsolutePath());
                 Log.i(TAG, "startOpenAiServer returned " + ok);
 
+                if (ok) {
+                    long deadline = System.currentTimeMillis() + 60000;
+                    boolean ready = false;
+                    while (System.currentTimeMillis() < deadline) {
+                        if (ChatClient.ping(LOCAL_SERVER_BASE_URL, 800)) {
+                            ready = true;
+                            break;
+                        }
+                        try {
+                            Thread.sleep(300);
+                        } catch (InterruptedException ignore) {
+                            break;
+                        }
+                    }
+                    if (!ready) {
+                        String nativeErr = "";
+                        try {
+                            nativeErr = NcnnLlmBridge.getLastServerError();
+                        } catch (Throwable ignore) {
+                        }
+                        final String nativeErrFinal = nativeErr;
+                        Log.e(TAG, "Server start requested but /health not reachable, lastError=" + nativeErrFinal);
+                        runOnUiThread(() -> {
+                            toast("服务未就绪，请查看 Logcat：" + nativeErrFinal);
+                            btnStartServer.setEnabled(true);
+                            btnStartServer.setText("启动模型服务");
+                            serverStarting.set(false);
+                            serverStarted = false;
+                            refreshServerButton();
+                        });
+                        return;
+                    }
+                }
+
                 runOnUiThread(() -> {
                     if (ok) {
                         serverStarted = true;
                         toast("模型服务已启动（18080）。");
                         refreshServerButton();
                     } else {
-                        toast("服务启动失败或已在运行。");
+                        String nativeErr = "";
+                        try {
+                            nativeErr = NcnnLlmBridge.getLastServerError();
+                        } catch (Throwable ignore) {
+                        }
+                        toast("服务启动失败或已在运行。 " + nativeErr);
                         btnStartServer.setEnabled(true);
                         btnStartServer.setText("启动模型服务");
                     }
@@ -229,6 +274,7 @@ public class MainActivity extends AppCompatActivity {
             msg.put("role", "user");
             msg.put("content", text);
             chatMessages.add(msg);
+            JavaMcpTools.ensureToolSystemMessage(chatMessages);
         } catch (org.json.JSONException e) {
             appendChatLine("系统", "JSON 组装失败：" + e.getMessage());
             return;
@@ -243,9 +289,16 @@ public class MainActivity extends AppCompatActivity {
         appendChatLine("系统", "请求中…（" + modelNameFinal + "）");
         new Thread(() -> {
             try {
+                final JSONArray tools = JavaMcpTools.buildOpenAiTools();
+                final AccessibilityToolBridge toolBridge = new AccessibilityToolBridge();
+                final int maxSteps = 8;
+                boolean legacy = false;
+
+                if (legacy) {
                 final StringBuilder reply = new StringBuilder();
                 final boolean[] toolHeaderShown = new boolean[]{false};
                 final String[] basePrefixHolder = new String[1];
+                final JSONArray[] toolHistoryHolder = new JSONArray[1];
                 CountDownLatch latch = new CountDownLatch(1);
                 runOnUiThread(() -> {
                     String base = outputText.getText() == null ? "" : outputText.getText().toString();
@@ -301,7 +354,21 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     @Override
+                    public void onToolHistory(JSONArray toolHistory) {
+                        toolHistoryHolder[0] = toolHistory;
+                    }
+
+                    @Override
+                    public void onToolCalls(JSONArray toolCalls) {
+                    }
+
+                    @Override
+                    public void onFinishReason(String finishReason) {
+                    }
+
+                    @Override
                     public void onDone() {
+                        appendToolHistoryToMessages(toolHistoryHolder[0], chatMessages);
                         try {
                             JSONObject assistant = new JSONObject();
                             assistant.put("role", "assistant");
@@ -325,6 +392,9 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 });
+                } else {
+                    runToolLoop(modelNameFinal, text, tools, toolBridge, maxSteps);
+                }
             } catch (Exception e) {
                 runOnUiThread(() -> appendChatLine("系统", "请求失败：" + e.getMessage()));
                 AccessCtlService s = AccessCtlService.getInstance();
@@ -333,6 +403,266 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }).start();
+    }
+
+    private void runToolLoop(String modelName,
+                             String firstUserText,
+                             JSONArray tools,
+                             AccessibilityToolBridge toolBridge,
+                             int maxSteps) throws Exception {
+        if (!ensureServerRunningOrPrompt(modelName, 60000)) {
+            return;
+        }
+        try {
+            for (int step = 0; step < maxSteps; step++) {
+            final StringBuilder reply = new StringBuilder();
+            final String[] basePrefixHolder = new String[1];
+            final JSONArray[] toolCallsHolder = new JSONArray[1];
+            final String[] errorHolder = new String[1];
+
+            CountDownLatch latch = new CountDownLatch(1);
+            runOnUiThread(() -> {
+                String base = outputText.getText() == null ? "" : outputText.getText().toString();
+                if (!TextUtils.isEmpty(base) && base.charAt(base.length() - 1) != '\n') {
+                    base += "\n";
+                }
+                basePrefixHolder[0] = base + "[模型] ";
+                outputText.setText(basePrefixHolder[0]);
+                latch.countDown();
+            });
+            latch.await();
+
+            AccessCtlService service = AccessCtlService.getInstance();
+            if (service != null) {
+                service.clearOverlayLlmText();
+                if (step == 0) {
+                    service.appendOverlayLogLine("[我] " + firstUserText);
+                }
+                service.appendOverlayLogLine("[系统] 请求中…（" + modelName + "）");
+            }
+
+            JSONArray toolsForThisRequest = (step == 0) ? tools : null;
+            ChatClient.chatCompletionsStream(
+                    LOCAL_SERVER_BASE_URL,
+                    modelName,
+                    chatMessages,
+                    toolsForThisRequest,
+                    JavaMcpTools.TOOL_MODE_EMIT,
+                    new ChatClient.StreamListener() {
+                        @Override
+                        public void onDelta(String text) {
+                            if (TextUtils.isEmpty(text)) return;
+                            reply.append(text);
+                            runOnUiThread(() -> {
+                                String basePrefix = basePrefixHolder[0] == null ? "" : basePrefixHolder[0];
+                                outputText.setText(basePrefix + reply);
+                            });
+                            AccessCtlService s = AccessCtlService.getInstance();
+                            if (s != null) {
+                                s.appendOverlayLlmText(text);
+                            }
+                        }
+
+                        @Override
+                        public void onToolTrace(String toolTrace) {
+                            String namesOnly = ToolTraceFormatter.toolNamesOnly(toolTrace);
+                            if (TextUtils.isEmpty(namesOnly)) return;
+                            runOnUiThread(() -> appendChatLine("工具", namesOnly));
+                            AccessCtlService s = AccessCtlService.getInstance();
+                            if (s != null) {
+                                s.appendOverlayLogLine("[工具] " + namesOnly);
+                            }
+                        }
+
+                        @Override
+                        public void onToolHistory(JSONArray toolHistory) {
+                        }
+
+                        @Override
+                        public void onToolCalls(JSONArray toolCalls) {
+                            toolCallsHolder[0] = toolCalls;
+                            String names = JavaMcpTools.toolNamesOnly(toolCalls);
+                            if (!TextUtils.isEmpty(names)) {
+                                runOnUiThread(() -> appendChatLine("需要调用工具", names));
+                                AccessCtlService s = AccessCtlService.getInstance();
+                                if (s != null) {
+                                    s.appendOverlayLogLine("[需要工具] " + names);
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void onFinishReason(String finishReason) {
+                        }
+
+                        @Override
+                        public void onDone() {
+                        }
+
+                        @Override
+                        public void onError(String message) {
+                            errorHolder[0] = message;
+                        }
+                    });
+
+            if (!TextUtils.isEmpty(errorHolder[0])) {
+                runOnUiThread(() -> appendChatLine("系统", "请求失败：" + errorHolder[0]));
+                AccessCtlService s = AccessCtlService.getInstance();
+                if (s != null) {
+                    s.appendOverlayLogLine("[系统] 请求失败：" + errorHolder[0]);
+                }
+                return;
+            }
+
+            JSONArray toolCalls = toolCallsHolder[0];
+            if (toolCalls != null && toolCalls.length() > 0) {
+                try {
+                    JSONObject assistant = new JSONObject();
+                    assistant.put("role", "assistant");
+                    assistant.put("content", reply.toString());
+                    assistant.put("tool_calls", toolCalls);
+                    chatMessages.add(assistant);
+                } catch (Exception ignore) {
+                }
+
+                for (int i = 0; i < toolCalls.length(); i++) {
+                    JSONObject tc = toolCalls.optJSONObject(i);
+                    JSONObject result = JavaMcpTools.executeToolCall(tc, toolBridge);
+                    try {
+                        JSONObject toolMsg = new JSONObject();
+                        toolMsg.put("role", "tool");
+                        toolMsg.put("content", result.toString());
+                        chatMessages.add(toolMsg);
+                    } catch (Exception ignore) {
+                    }
+
+                    String name = "";
+                    try {
+                        JSONObject fn = tc == null ? null : tc.optJSONObject("function");
+                        name = fn == null ? "" : fn.optString("name", "");
+                    } catch (Exception ignore) {
+                    }
+                    final String nameFinal = name;
+                    final boolean ok = result.optBoolean("ok", false);
+                    runOnUiThread(() -> appendChatLine("工具结果", nameFinal + " ok=" + ok));
+                    AccessCtlService s = AccessCtlService.getInstance();
+                    if (s != null) {
+                        s.appendOverlayLogLine("[工具结果] " + nameFinal + " ok=" + ok);
+                    }
+                }
+
+                runOnUiThread(() -> appendChatLine("系统", "工具执行完成，继续推理…"));
+                continue;
+            }
+
+            try {
+                JSONObject assistant = new JSONObject();
+                assistant.put("role", "assistant");
+                assistant.put("content", reply.toString());
+                chatMessages.add(assistant);
+            } catch (Exception ignore) {
+            }
+
+            runOnUiThread(() -> appendChatLine("系统", "完成"));
+            AccessCtlService s = AccessCtlService.getInstance();
+            if (s != null) {
+                s.appendOverlayLogLine("[系统] 完成");
+            }
+            return;
+        }
+
+        runOnUiThread(() -> appendChatLine("系统", "超过最大工具循环次数，已停止。"));
+        AccessCtlService s = AccessCtlService.getInstance();
+        if (s != null) {
+            s.appendOverlayLogLine("[系统] 超过最大工具循环次数，已停止。");
+        }
+        } catch (Exception e) {
+            Log.e(TAG, "runToolLoop exception: " + e, e);
+            runOnUiThread(() -> appendChatLine("系统", "runToolLoop 异常: " + e));
+            AccessCtlService s = AccessCtlService.getInstance();
+            if (s != null) {
+                s.appendOverlayLogLine("[系统] runToolLoop 异常: " + e);
+            }
+            throw e;
+        }
+    }
+
+    private boolean ensureServerRunningOrPrompt(String modelName, long timeoutMs) {
+        if (serverStarted && ChatClient.ping(LOCAL_SERVER_BASE_URL, 800)) {
+            return true;
+        }
+
+        runOnUiThread(() -> appendChatLine("系统", "本地服务未启动，尝试启动…"));
+        AccessCtlService s = AccessCtlService.getInstance();
+        if (s != null) {
+            s.appendOverlayLogLine("[系统] 本地服务未启动，尝试启动…");
+        }
+
+        runOnUiThread(this::startServerWithDownload);
+
+        long deadline = System.currentTimeMillis() + Math.max(5000L, timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            if (serverStarted && ChatClient.ping(LOCAL_SERVER_BASE_URL, 800)) {
+                runOnUiThread(() -> appendChatLine("系统", "本地服务已就绪。"));
+                AccessCtlService s2 = AccessCtlService.getInstance();
+                if (s2 != null) {
+                    s2.appendOverlayLogLine("[系统] 本地服务已就绪。");
+                }
+                return true;
+            }
+            if (!serverStarting.get() && !serverStarted) {
+                break;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ignore) {
+                break;
+            }
+        }
+
+        runOnUiThread(() -> appendChatLine("系统", "本地服务未启动成功，请先点“启动模型服务”。"));
+        AccessCtlService s3 = AccessCtlService.getInstance();
+        if (s3 != null) {
+            s3.appendOverlayLogLine("[系统] 本地服务未启动成功，请先点“启动模型服务”。");
+        }
+        return false;
+    }
+
+    private void appendToolHistoryToMessages(JSONArray toolHistory, List<JSONObject> messages) {
+        if (toolHistory == null || toolHistory.length() == 0 || messages == null) {
+            return;
+        }
+        final int maxLen = 2000;
+        for (int i = 0; i < toolHistory.length(); i++) {
+            JSONObject item = toolHistory.optJSONObject(i);
+            if (item == null) continue;
+            String name = item.optString("name", "");
+            boolean ok = item.optBoolean("ok", false);
+            String error = item.optString("error", "");
+            Object result = item.opt("result");
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("[工具结果] ").append(name).append('\n');
+            sb.append("ok=").append(ok);
+            if (!TextUtils.isEmpty(error)) {
+                sb.append(" error=").append(error);
+            }
+            if (result != null) {
+                String r = String.valueOf(result);
+                if (r.length() > maxLen) {
+                    r = r.substring(0, maxLen) + "...(truncated,len=" + r.length() + ")";
+                }
+                sb.append('\n').append(r);
+            }
+
+            try {
+                JSONObject msg = new JSONObject();
+                msg.put("role", "system");
+                msg.put("content", sb.toString());
+                messages.add(msg);
+            } catch (Exception ignore) {
+            }
+        }
     }
 
     private void appendChatLine(String who, String text) {

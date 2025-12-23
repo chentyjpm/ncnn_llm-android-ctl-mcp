@@ -42,6 +42,11 @@ struct GenerateConfig {
 
     std::function<nlohmann::json(const nlohmann::json&)> tool_callback = nullptr;
 
+    // When enabled, stop generation once a tool call JSON is completed (tool_call_end_id reached),
+    // and report the call via on_tool_call (instead of executing tool_callback / injecting tool_response).
+    bool return_tool_calls = false;
+    std::function<void(const nlohmann::json&)> on_tool_call = nullptr;
+
     bool debug = false;
 };
 

@@ -49,6 +49,12 @@ target_include_directories(ncnn_llm_jni PRIVATE
 
 target_compile_definitions(ncnn_llm_jni PRIVATE NCNN_LLM_NO_OPENCV)
 
+# Windows 本机 Debug 编译时，clang++ 生成调试信息会占用大量内存，可能触发 “paging file is too small”。
+# 这里对 Debug 配置关闭 native 调试信息以降低内存占用，保证能顺利编译出 APK。
+target_compile_options(ncnn_llm_jni PRIVATE
+    $<$<CONFIG:Debug>:-g0>
+)
+
 target_link_libraries(ncnn_llm_jni
     ncnn
     log

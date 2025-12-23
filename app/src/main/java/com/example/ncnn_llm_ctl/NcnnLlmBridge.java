@@ -20,6 +20,8 @@ public final class NcnnLlmBridge {
 
     public static native void registerAccessibilityToolBridge(AccessibilityToolBridge bridge);
 
+    public static native String getLastServerError();
+
     public static boolean startOpenAiServerAutoDownload(android.content.Context context,
                                                         String modelName,
                                                         int port,

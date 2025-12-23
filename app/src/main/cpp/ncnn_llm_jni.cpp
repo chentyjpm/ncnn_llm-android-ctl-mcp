@@ -5,6 +5,8 @@
 #include <mutex>
 #include <exception>
 #include <cstring>
+#include <unordered_map>
+#include <functional>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <android/log.h>
@@ -104,6 +106,9 @@ struct LocalLlmHandle {
     ncnn_llm_gpt model;
 };
 
+static std::mutex g_server_error_mu;
+static std::string g_last_server_error;
+
 static void throw_runtime(JNIEnv* env, const std::string& msg) {
     jclass ex = env->FindClass("java/lang/RuntimeException");
     if (ex) {
@@ -178,6 +183,11 @@ Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_startOpenAiServerWithWebRoot(
     int server_port = port > 0 ? port : 18080;
     bool vulkan = (useVulkan == JNI_TRUE);
 
+    {
+        std::lock_guard<std::mutex> lock(g_server_error_mu);
+        g_last_server_error.clear();
+    }
+
     std::thread([model_path, server_port, vulkan, web_root]() {
         try {
             if (!dir_exists(model_path)) {
@@ -197,7 +207,9 @@ Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_startOpenAiServerWithWebRoot(
             opt.model_path = model_path;
             opt.use_vulkan = vulkan;
             opt.port = server_port;
-            opt.enable_builtin_tools = true;
+            // Tools/MCP are orchestrated in Java (tool definitions + execution + loop).
+            // Native server only runs the model and returns tool_calls when requested.
+            opt.enable_builtin_tools = false;
             opt.mcp_server_cmdline.clear();
             opt.web_root = web_root;
 
@@ -205,20 +217,38 @@ Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_startOpenAiServerWithWebRoot(
             __android_log_print(ANDROID_LOG_INFO, kTag, "Initializing model... useVulkan=%d", vulkan ? 1 : 0);
             ncnn_llm_gpt model(opt.model_path, opt.use_vulkan);
             __android_log_print(ANDROID_LOG_INFO, kTag, "Model initialized, starting HTTP server on %d", server_port);
-            std::vector<json> builtin_tools = opt.enable_builtin_tools ? make_builtin_tools() : std::vector<json>();
-            auto builtin_router = make_builtin_router();
+            std::vector<json> builtin_tools;
+            std::unordered_map<std::string, std::function<json(const json&)>> builtin_router;
             std::mutex mcp_mutex;
 
             run_openai_server(opt, model, builtin_tools, builtin_router, mcp, mcp_mutex);
         } catch (const std::exception& e) {
             __android_log_print(ANDROID_LOG_ERROR, kTag, "Server init failed: %s", e.what());
+            {
+                std::lock_guard<std::mutex> lock(g_server_error_mu);
+                g_last_server_error = e.what();
+            }
         } catch (...) {
             __android_log_print(ANDROID_LOG_ERROR, kTag, "Server init failed: unknown error");
+            {
+                std::lock_guard<std::mutex> lock(g_server_error_mu);
+                g_last_server_error = "unknown error";
+            }
         }
         g_server_running.store(false);
     }).detach();
 
     return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_ncnn_1llm_1ctl_NcnnLlmBridge_getLastServerError(JNIEnv* env, jclass clazz) {
+    (void)clazz;
+    std::lock_guard<std::mutex> lock(g_server_error_mu);
+    if (g_last_server_error.empty()) {
+        return env->NewStringUTF("");
+    }
+    return env->NewStringUTF(g_last_server_error.c_str());
 }
 
 extern "C" JNIEXPORT void JNICALL

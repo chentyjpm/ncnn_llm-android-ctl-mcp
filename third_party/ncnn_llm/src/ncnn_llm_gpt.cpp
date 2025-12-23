@@ -733,12 +733,19 @@ std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::prefill(const std::string& input
 std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::generate(const std::shared_ptr<ncnn_llm_gpt_ctx>& ctx_in, const GenerateConfig& cfg, std::function<void(const std::string&)> callback) const {
     const int vocab_size = bpe->vocab_size();
 
-    auto handle_tool = [&](const std::string& tool_call_text, std::shared_ptr<ncnn_llm_gpt_ctx>& ctx_ref) {
+    auto handle_tool = [&](const std::string& tool_call_text, std::shared_ptr<ncnn_llm_gpt_ctx>& ctx_ref) -> bool {
         nlohmann::json tool_call_json;
         try {
             tool_call_json = nlohmann::json::parse(tool_call_text);
         } catch (const std::exception& e) {
             tool_call_json = nlohmann::json::object();
+        }
+
+        if (cfg.return_tool_calls) {
+            if (cfg.on_tool_call) {
+                cfg.on_tool_call(tool_call_json);
+            }
+            return false;
         }
 
         nlohmann::json tool_resp;
@@ -752,6 +759,7 @@ std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::generate(const std::shared_ptr<n
         std::string tool_response_post = "\n\n</tool_response><|im_end|>\n<|im_start|>assistant\n<think>\n</think>\n\n";
 
         ctx_ref = prefill(tool_response_pre + tool_resp.dump() + tool_response_post, ctx_ref);
+        return true;
     };
 
     if (cfg.do_sample == 1 || cfg.beam_size <= 1) {
@@ -769,10 +777,11 @@ std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::generate(const std::shared_ptr<n
                 flag_in_tool_call = true;
             } else if (ctx->cur_token == tool_call_end_id) {
                 flag_in_tool_call = false;
-                handle_tool(tool_call_content, ctx);
+                bool should_continue = handle_tool(tool_call_content, ctx);
                 tool_call_content.clear();
                 history.clear();
                 history.insert(ctx->cur_token);
+                if (!should_continue) break;
                 continue;
             } else if (flag_in_tool_call) {
                 tool_call_content += bpe->decode({ctx->cur_token}, false);
@@ -888,6 +897,9 @@ std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::generate(const std::shared_ptr<n
             callback(bpe->decode({t}, false));
         }
     };
+
+    std::shared_ptr<ncnn_llm_gpt_ctx> early_return_ctx;
+    bool early_return = false;
 
     for (int step = 0; step < cfg.max_new_tokens; ++step) {
         std::vector<Beam> candidates;
@@ -1006,19 +1018,27 @@ std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::generate(const std::shared_ptr<n
                     nb.in_tool_call = true;
                 } else if (tok == tool_call_end_id && nb.in_tool_call) {
                     nb.in_tool_call = false;
-                    handle_tool(nb.tool_buffer, nb.ctx);
+                    bool should_continue = handle_tool(nb.tool_buffer, nb.ctx);
                     nb.tool_buffer.clear();
                     nb.tokens.clear();
                     nb.tokens.insert(nb.ctx->cur_token);
                     nb.finished = (nb.ctx->cur_token == eos);
-                    tool_completed = nb;
-                    has_tool_completed = true;
+                    if (!should_continue) {
+                        early_return_ctx = nb.ctx;
+                        early_return = true;
+                        break;
+                    } else {
+                        tool_completed = nb;
+                        has_tool_completed = true;
+                    }
                 } else if (nb.in_tool_call) {
                     nb.tool_buffer += bpe->decode({tok}, false);
                 }
                 candidates.push_back(std::move(nb));
             }
+            if (early_return) break;
         }
+        if (early_return) break;
 
         if (has_tool_completed) {
             beams.clear();
@@ -1077,6 +1097,10 @@ std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::generate(const std::shared_ptr<n
             if (!b.finished) { all_finished = false; break; }
         }
         if (all_finished) break;
+    }
+
+    if (early_return && early_return_ctx) {
+        return early_return_ctx;
     }
 
     auto best_it = std::max_element(beams.begin(), beams.end(), [](const Beam& a, const Beam& b) { return a.score < b.score; });
