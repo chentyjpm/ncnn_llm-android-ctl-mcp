@@ -2,6 +2,13 @@
 
 这是一个 Android Studio 工程（Java），基于无障碍服务（AccessibilityService）获取**系统/其他应用**的 UI 结构，并集成 ncnn_llm 在本机启动 OpenAI 风格 HTTP 服务，让大模型调用工具执行自动化操作。
 
+## 下载
+
+- [Release 页面](https://github.com/chentyjpm/ncnn_llm-android-ctl-mcp/releases)
+- [最新版本（latest）](https://github.com/chentyjpm/ncnn_llm-android-ctl-mcp/releases/latest)
+
+[![Android CI](https://github.com/ncnn_llm-android-ctl-mcp/releases/actions/workflows/android-ci.yml/badge.svg)](https://github.com/ncnn_llm-android-ctl-mcp/releases/actions/workflows/android-ci.yml)
+
 ## 参考项目
 
 - ncnn_llm：https://github.com/futz12/ncnn_llm
